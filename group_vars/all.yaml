@@ -1,0 +1,11 @@
+ansible_user: ec2-user
+ansible_password: DevOps321
+MONGODB_HOST: mongodb-dev.aitechapp.fun
+CATALOGUE_HOST: catalogue-dev.aitechapp.fun
+REDIS_HOST: redis-dev.aitechapp.fun
+USER_HOST: user-dev.aitechapp.fun
+CART_HOST: cart-dev.aitechapp.fun
+MYSQL_HOST: mysql-dev.aitechapp.fun
+SHIPPING_HOST: shipping-dev.aitechapp.fun
+RABBITMQ_HOST: rabbitmq-dev.aitechapp.fun
+PAYMENT_HOST: payment-dev.aitechapp.fun
