@@ -1,15 +1,36 @@
+# ==============================================================================
+# AWS EC2 Dynamic Inventory Plugin Configuration for RoboShop
+# Plugin Requirement: amazon.aws collection + boto3/botocore on control node
+# File Requirement: Filename must end with 'aws_ec2.yaml' or 'aws_ec2.yml'
+# Usage:
+#   1. Inspect inventory graph:  ansible-inventory -i frontend.aws_ec2.yaml --graph
+#   2. Run role playbook:        ansible-playbook -i frontend.aws_ec2.yaml -e component=frontend roboshop.yaml
+# ==============================================================================
+
+# 1. Declare the dynamic inventory plugin
 plugin: amazon.aws.aws_ec2
+
+# 2. Target AWS region where RoboShop EC2 instances reside
 regions:
-- us-east-1
+  - us-east-1
+
+# 3. Use the EC2 instance's Private IP address as the inventory hostname
 hostnames:
-- private-ip-address
+  - private-ip-address
+
+# 4. Filter only active, running instances matching the target component tag
 filters:
-  instance-state-name : running
+  instance-state-name: running
   tag:Name: frontend-dev
+
+# 5. Set Ansible connection variable (ansible_host) to the instance's private IP
 compose:
-  # This sets the ansible_host variable to connect with the private IP address without changing the hostname.
+  # Instructs SSH to connect directly to the private IP address discovered from AWS
   ansible_host: private_ip_address
+
+# 6. Dynamically generate inventory groups from EC2 tags
 keyed_groups:
-- separator: ''
-  # name of the group is frontend
-  key: tags.Name | regex_replace('-.*$', '')
+  - separator: ''
+    # Strips '-dev' from the tag 'frontend-dev' using regex (frontend-dev -> frontend)
+    # This automatically produces the [frontend] group required by roboshop.yaml (hosts: "{{ component }}")
+    key: tags.Name | regex_replace('-.*$', '')

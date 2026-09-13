@@ -176,22 +176,47 @@ In [roboshop.yaml:L1-L6](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-
 * The remaining 6 instances continue serving customer traffic, ensuring high availability and zero downtime during upgrades.
 
 ### 3. AWS EC2 Dynamic Inventory Plugin (`frontend.aws_ec2.yaml`)
-[frontend.aws_ec2.yaml:L1-L15](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/frontend.aws_ec2.yaml#L1-L15) eliminates the need to manually update IP addresses:
+[frontend.aws_ec2.yaml:L1-L36](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/frontend.aws_ec2.yaml#L1-L36) eliminates the need to manually track or hardcode IP addresses by dynamically querying AWS EC2 APIs at runtime:
+
 ```yaml
+# 1. Declare dynamic inventory plugin
 plugin: amazon.aws.aws_ec2
+
+# 2. Target AWS region
 regions:
-- us-east-1
+  - us-east-1
+
+# 3. Use instance private IP as hostname
 hostnames:
-- private-ip-address
+  - private-ip-address
+
+# 4. Filter only running frontend instances
 filters:
   instance-state-name: running
   tag:Name: frontend-dev
+
+# 5. Connect via private IP address
 compose:
   ansible_host: private_ip_address
+
+# 6. Dynamically create the [frontend] group from tag Name (frontend-dev -> frontend)
 keyed_groups:
-- separator: ''
-  key: tags.Name | regex_replace('-.*$', '')
+  - separator: ''
+    key: tags.Name | regex_replace('-.*$', '')
 ```
+
+#### How Dynamic Groups & IP Discovery Work:
+1. **Dynamic IP Resolution (`compose: ansible_host: private_ip_address`):**
+   - Retrieves the private IP (e.g., `172.31.x.x`) directly from the AWS EC2 metadata and assigns it to `ansible_host`, instructing SSH to route directly to that private IP.
+2. **Automatic Group Creation (`keyed_groups`):**
+   - Inspects the EC2 tag `tag:Name: frontend-dev`.
+   - The regex `regex_replace('-.*$', '')` strips `-dev`, creating a dynamic Ansible group named **`[frontend]`**.
+   - In [roboshop.yaml:L1-L2](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop.yaml#L1-L2), `hosts: "{{ component }}"` matches `component=frontend` directly to this dynamically formed group.
+3. **Graph Inspection Command:**
+   ```bash
+   ansible-inventory -i frontend.aws_ec2.yaml --graph
+   ```
+
 
 ### 4. Static vs Dynamic Task Composition (`import_role` vs `include_role`)
 Demonstrated in [include-vs-import.yaml](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/include-vs-import.yaml#L1-L5):
@@ -399,42 +424,46 @@ ansible-playbook -i localhost, \
 
 ## 8. Step-by-Step Deployment Runbook (Ansible Roles Execution)
 
+> [!TIP]
+> **Why `-i inventory.ini` is optional:** Because [ansible.cfg:L3](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/ansible.cfg#L3) explicitly declares `inventory = inventory.ini` under `[defaults]`, Ansible automatically loads `inventory.ini` when run from this directory. Specifying `-i inventory.ini` produces the exact same outcome as omitting it, but omitting it keeps commands clean. The `-i` flag is only strictly required when overriding the default (e.g. using `frontend.aws_ec2.yaml`).
+
 Once infrastructure is provisioned and connectivity is verified, execute the roles from `ansible-roboshop-roles`:
 
 ### 1. Test Node Connectivity
-Using the inventory file [inventory.ini](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/inventory.ini#L1-L34):
+Using default inventory from `ansible.cfg`:
 ```bash
-ansible all -i inventory.ini -m ping
+ansible all -m ping
 ```
 
 ### 2. Deploy Database Tier
 Deploy databases first so backend microservices can immediately establish connections:
 ```bash
-ansible-playbook -i inventory.ini -e component=mongodb roboshop.yaml
-ansible-playbook -i inventory.ini -e component=redis roboshop.yaml
-ansible-playbook -i inventory.ini -e component=mysql roboshop.yaml
-ansible-playbook -i inventory.ini -e component=rabbitmq roboshop.yaml
+ansible-playbook -e component=mongodb roboshop.yaml
+ansible-playbook -e component=redis roboshop.yaml
+ansible-playbook -e component=mysql roboshop.yaml
+ansible-playbook -e component=rabbitmq roboshop.yaml
 ```
 
 ### 3. Deploy Backend Microservices
 ```bash
-ansible-playbook -i inventory.ini -e component=catalogue roboshop.yaml
-ansible-playbook -i inventory.ini -e component=user roboshop.yaml
-ansible-playbook -i inventory.ini -e component=cart roboshop.yaml
-ansible-playbook -i inventory.ini -e component=shipping roboshop.yaml
-ansible-playbook -i inventory.ini -e component=payment roboshop.yaml
+ansible-playbook -e component=catalogue roboshop.yaml
+ansible-playbook -e component=user roboshop.yaml
+ansible-playbook -e component=cart roboshop.yaml
+ansible-playbook -e component=shipping roboshop.yaml
+ansible-playbook -e component=payment roboshop.yaml
 ```
 
 ### 4. Deploy Frontend Web Gateway
 ```bash
-ansible-playbook -i inventory.ini -e component=frontend roboshop.yaml
+ansible-playbook -e component=frontend roboshop.yaml
 ```
 
 ### 5. Deploying via Dynamic Inventory (`aws_ec2`)
-To deploy without static inventory files using AWS EC2 tags:
+To override the default inventory and discover EC2 instances dynamically via AWS tags:
 ```bash
 ansible-playbook -i frontend.aws_ec2.yaml -e component=frontend roboshop.yaml
 ```
+
 
 ---
 
