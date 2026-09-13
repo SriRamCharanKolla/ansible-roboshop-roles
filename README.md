@@ -18,8 +18,17 @@
    - [Database Roles (MongoDB, Redis, MySQL, RabbitMQ)](#1-database-roles)
    - [Microservice Roles (Catalogue, User, Cart, Shipping, Payment)](#2-microservice-roles)
    - [Web Tier Role (Frontend / Nginx)](#3-web-tier-role)
-7. [Step-by-Step Deployment Runbook](#step-by-step-deployment-runbook)
-8. [Verification, Health Checks & Troubleshooting](#verification-health-checks--troubleshooting)
+7. [Infrastructure Provisioning & Route 53 DNS Setup (Pre-requisite)](#7-infrastructure-provisioning--route-53-dns-setup-pre-requisite)
+   - [Separation of Concerns: IaaS vs Configuration Management](#1-separation-of-concerns-iaas-vs-configuration-management)
+   - [End-to-End Infrastructure Provisioning Architecture](#2-end-to-end-infrastructure-provisioning-architecture)
+   - [EC2 & Route 53 Provisioning Playbook Breakdown](#3-ec2--route-53-provisioning-playbook-breakdown)
+   - [Infrastructure Creation Commands](#4-infrastructure-creation-commands)
+   - [How Route 53 Integrates with `inventory.ini`](#5-how-route-53-integrates-with-inventoryini)
+   - [DNS Resolution & Network Connectivity Pre-Flight Check](#6-dns-resolution--network-connectivity-pre-flight-check)
+   - [Infrastructure Teardown / Decommissioning Command](#7-infrastructure-teardown--decommissioning-command)
+8. [Step-by-Step Deployment Runbook (Ansible Roles Execution)](#8-step-by-step-deployment-runbook-ansible-roles-execution)
+9. [Verification, Health Checks & Troubleshooting](#9-verification-health-checks--troubleshooting)
+
 
 ---
 
@@ -211,7 +220,186 @@ Demonstrated in [include-vs-import.yaml](file:///Users/sriramcharankolla/Desktop
 
 ---
 
-## Step-by-Step Deployment Runbook
+## 7. Infrastructure Provisioning & Route 53 DNS Setup (Pre-requisite)
+
+Before executing the configuration management roles in this repository, the underlying target infrastructure—**10 EC2 instances and their corresponding Route 53 Private & Public DNS records**—must exist and be reachable over the network.
+
+### 1. Separation of Concerns: IaaS vs Configuration Management
+
+A fundamental principle in modern DevOps is decoupling **Infrastructure as Code (IaaS)** from **Configuration Management (CM)**:
+
+| Architectural Layer | Responsibility | Repository / Tool | Output Artifacts |
+| :--- | :--- | :--- | :--- |
+| **Layer 1: Infrastructure Provisioning (IaaS)** | Day-0/1 resource creation (VPCs, Security Groups, EC2 instances, Route 53 DNS). | [roboshop-ansible/roboshop.yaml](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L1-L94) or Terraform ([roboshop-infra-dev](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-infra-dev)) | 10 Running EC2 VMs, Private IPs, `<component>-dev.aitechapp.fun` DNS records |
+| **Layer 2: Configuration Management (CM)** | Day-2 OS hardening, package runtimes, app source code, runtime secret injection, and systemd services. | **`ansible-roboshop-roles`** (This Repository) | Fully operational microservices listening on ports 80, 8080, 3306, 27017, etc. |
+
+> [!NOTE]
+> `ansible-roboshop-roles` is strictly focused on **Layer 2 (Configuration Management)**. It purposefully does not contain EC2 provisioning logic to maintain modularity, idempotency, and portability across clouds, bare-metal, or local staging VMs.
+
+---
+
+### 2. End-to-End Infrastructure Provisioning Architecture
+
+```mermaid
+flowchart TD
+    subgraph ControlNode ["DevOps Workstation / Ansible Control Node"]
+        AWS_CLI["AWS Credentials (aws configure / IAM Role)"]
+        ProvCmd["ansible-playbook roboshop.yaml -e action=create"]
+    end
+
+    subgraph AWS_Cloud ["AWS Cloud Infrastructure (us-east-1)"]
+        subgraph EC2_Instances ["10 x t3.micro EC2 Instances (CentOS-Stream-9)"]
+            VM_DB["mongodb-dev, redis-dev, mysql-dev, rabbitmq-dev"]
+            VM_APP["catalogue-dev, user-dev, cart-dev, shipping-dev, payment-dev"]
+            VM_FE["frontend-dev (Public IP + Private IP)"]
+        end
+
+        subgraph Route53_Zone ["AWS Route 53 (Hosted Zone: aitechapp.fun)"]
+            R53_Priv["Private A-Records (TTL: 1s)<br/>*.dev.aitechapp.fun → Private IPs"]
+            R53_Pub["Public A-Record (TTL: 1s)<br/>roboshop-dev.aitechapp.fun → Frontend Public IP"]
+        end
+    end
+
+    subgraph CM_Roles ["ansible-roboshop-roles (Configuration Execution)"]
+        InvFile["inventory.ini (Targets *.dev.aitechapp.fun)"]
+        DynInv["frontend.aws_ec2.yaml (Dynamic AWS Tags)"]
+        RunRoles["ansible-playbook roboshop.yaml -e component=<name>"]
+    end
+
+    ProvCmd -->|amazon.aws.ec2_instance| EC2_Instances
+    EC2_Instances -->|Captures IP Addresses| ProvCmd
+    ProvCmd -->|amazon.aws.route53| Route53_Zone
+    Route53_Zone -.->|Resolves Hostnames| InvFile
+    EC2_Instances -.->|Discovered via Tags| DynInv
+    InvFile & DynInv --> RunRoles
+```
+
+---
+
+### 3. EC2 & Route 53 Provisioning Playbook Breakdown
+
+The infrastructure provisioning playbook is defined in [roboshop-ansible/roboshop.yaml](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L1-L94). Here is its end-to-end execution flow:
+
+1. **Variables & Parameters Block ([roboshop.yaml:L6-L15](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L6-L15)):**
+   - `sg_id`: AWS Security Group ID granting ingress for SSH (22), HTTP (80), Application (8080), and database ports.
+   - `ami_id`: AMI for CentOS-Stream-9 / RHEL-9 (`ami-0220d79f3f480ecf5`).
+   - `domain_name`: Hosted zone domain (`aitechapp.fun`).
+   - `env`: Environment prefix (`dev`).
+   - `instances`: List of 10 microservices (`mongodb`, `catalogue`, `redis`, `user`, `cart`, `mysql`, `shipping`, `rabbitmq`, `payment`, `frontend`).
+
+2. **EC2 Provisioning Task ([roboshop.yaml:L17-L30](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L17-L30)):**
+   - Uses the `amazon.aws.ec2_instance` module to launch a `t3.micro` instance for each entry in `instances`.
+   - Automatically tags each instance with `Project: roboshop`, `Environment: dev`, `Component: {{ item }}`, and `Name: {{ item }}-dev`.
+   - Registers all output attributes (instance IDs, private/public IPs) into `ec2_output`.
+
+3. **Route 53 Internal DNS Task ([roboshop.yaml:L37-L49](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L37-L49)):**
+   - Uses `amazon.aws.route53` module.
+   - Iterates through `ec2_output.results` and creates an `A` record for each service:
+     `{{ item.item }}-dev.aitechapp.fun` pointing to `item.instances[0].private_ip_address` with a low TTL (`1s`) for instantaneous DNS propagation.
+
+4. **Route 53 Public DNS Task for Frontend ([roboshop.yaml:L50-L61](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L50-L61)):**
+   - Maps the public domain `roboshop-dev.aitechapp.fun` directly to the `frontend` instance's `public_ip_address`, allowing internet clients to access the web store.
+
+5. **Teardown & Clean Destruction ([roboshop.yaml:L63-L94](file:///Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible/roboshop.yaml#L63-L94)):**
+   - When `action == "destroy"`, Ansible safely terminates the EC2 instances and deletes the Route 53 records.
+
+---
+
+### 4. Infrastructure Creation Commands
+
+#### Pre-requisite: AWS Credentials & Python Libraries
+On your Ansible control node, ensure AWS credentials and SDK dependencies are configured:
+```bash
+# 1. Configure AWS Credentials
+aws configure
+# Or export via environment variables:
+export AWS_ACCESS_KEY_ID="your_access_key"
+export AWS_SECRET_ACCESS_KEY="your_secret_key"
+export AWS_DEFAULT_REGION="us-east-1"
+
+# 2. Verify AWS Python SDK dependencies
+python3 -m pip install boto3 botocore
+```
+
+#### Provision All 10 EC2 Instances & Route 53 Records
+Execute the provisioning playbook from the `roboshop-ansible` directory:
+```bash
+cd /Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible
+
+ansible-playbook -i localhost, \
+  -e '{"instances":["mongodb","catalogue","redis","user","cart","mysql","shipping","rabbitmq","payment","frontend"]}' \
+  -e action=create \
+  roboshop.yaml
+```
+
+#### Provision Specific Components (e.g. Databases Only)
+```bash
+ansible-playbook -i localhost, \
+  -e '{"instances":["mongodb","redis","mysql","rabbitmq"]}' \
+  -e action=create \
+  roboshop.yaml
+```
+
+---
+
+### 5. How Route 53 Integrates with `inventory.ini`
+
+Once the provisioning playbook completes, AWS Route 53 hosts the following private endpoints:
+
+| Component | Route 53 DNS Record | IP Target | Mapped Group in [inventory.ini](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/inventory.ini#L1-L34) |
+| :--- | :--- | :--- | :--- |
+| **MongoDB** | `mongodb-dev.aitechapp.fun` | Private IP | `[mongodb]` |
+| **Catalogue** | `catalogue-dev.aitechapp.fun` | Private IP | `[catalogue]` |
+| **Redis** | `redis-dev.aitechapp.fun` | Private IP | `[redis]` |
+| **User** | `user-dev.aitechapp.fun` | Private IP | `[user]` |
+| **Cart** | `cart-dev.aitechapp.fun` | Private IP | `[cart]` |
+| **MySQL** | `mysql-dev.aitechapp.fun` | Private IP | `[mysql]` |
+| **Shipping** | `shipping-dev.aitechapp.fun` | Private IP | `[shipping]` |
+| **RabbitMQ** | `rabbitmq-dev.aitechapp.fun` | Private IP | `[rabbitmq]` |
+| **Payment** | `payment-dev.aitechapp.fun` | Private IP | `[payment]` |
+| **Frontend** | `frontend-dev.aitechapp.fun` | Private IP | `[frontend]` |
+| **Public Store** | `roboshop-dev.aitechapp.fun` | Public IP | Web Gateway |
+
+Because [inventory.ini:L1-L34](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/inventory.ini#L1-L34) references these exact DNS hostnames, Ansible seamlessly resolves each target server without needing manual IP tracking.
+
+---
+
+### 6. DNS Resolution & Network Connectivity Pre-Flight Check
+
+Before running configuration roles, verify that all hostnames resolve and SSH connectivity is established:
+
+```bash
+# 1. Verify Route 53 DNS resolution from your workstation / control node
+for host in mongodb catalogue redis user cart mysql shipping rabbitmq payment frontend; do
+  echo -n "$host-dev.aitechapp.fun: "
+  dig +short "$host-dev.aitechapp.fun"
+done
+
+# 2. Test SSH Ping to all nodes using Ansible
+cd /Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles
+ansible all -i inventory.ini -m ping
+```
+
+---
+
+### 7. Infrastructure Teardown / Decommissioning Command
+
+When you are finished testing and wish to avoid unnecessary AWS cloud costs, terminate all instances and purge Route 53 DNS records with a single command:
+
+```bash
+cd /Users/sriramcharankolla/Desktop/DevOps/roboshop-ansible
+
+ansible-playbook -i localhost, \
+  -e '{"instances":["mongodb","catalogue","redis","user","cart","mysql","shipping","rabbitmq","payment","frontend"]}' \
+  -e action=destroy \
+  roboshop.yaml
+```
+
+---
+
+## 8. Step-by-Step Deployment Runbook (Ansible Roles Execution)
+
+Once infrastructure is provisioned and connectivity is verified, execute the roles from `ansible-roboshop-roles`:
 
 ### 1. Test Node Connectivity
 Using the inventory file [inventory.ini](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/inventory.ini#L1-L34):
@@ -220,6 +408,7 @@ ansible all -i inventory.ini -m ping
 ```
 
 ### 2. Deploy Database Tier
+Deploy databases first so backend microservices can immediately establish connections:
 ```bash
 ansible-playbook -i inventory.ini -e component=mongodb roboshop.yaml
 ansible-playbook -i inventory.ini -e component=redis roboshop.yaml
@@ -241,14 +430,15 @@ ansible-playbook -i inventory.ini -e component=payment roboshop.yaml
 ansible-playbook -i inventory.ini -e component=frontend roboshop.yaml
 ```
 
-### 5. Using Dynamic Inventory:
+### 5. Deploying via Dynamic Inventory (`aws_ec2`)
+To deploy without static inventory files using AWS EC2 tags:
 ```bash
 ansible-playbook -i frontend.aws_ec2.yaml -e component=frontend roboshop.yaml
 ```
 
 ---
 
-## Verification, Health Checks & Troubleshooting
+## 9. Verification, Health Checks & Troubleshooting
 
 ```bash
 # Check service status on target instance
@@ -263,3 +453,4 @@ sudo journalctl -u shipping -f
 curl http://localhost/health
 curl http://localhost:8080/health
 ```
+
