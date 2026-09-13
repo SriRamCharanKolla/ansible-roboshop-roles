@@ -63,49 +63,49 @@ Secrets: AWS Secrets Manager | Concurrency: serial: 3 | Discovery: AWS EC2 Dynam
 ### 1. Storefront Landing & Microservices Gateway (`roboshop-app-1.png`)
 *The customer-facing storefront served via Nginx reverse proxy, routing traffic across Catalogue, User, Cart, Shipping, and Payment backend services.*
 
-![RoboShop Storefront Landing Page](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-1.png)
+![RoboShop Storefront Landing Page](./roboshop-app-1.png)
 
 ---
 
 ### 2. User Authentication & Profile Registration (`roboshop-app-2.png`)
 *User service login and registration modal storing credentials in MongoDB and caching active user sessions in Redis.*
 
-![User Registration and Login](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-2.png)
+![User Registration and Login](./roboshop-app-2.png)
 
 ---
 
 ### 3. Authenticated Customer Dashboard & Order History (`roboshop-app-3.png`)
 *User session validated against Redis cache with historical order lookup (`GET /api/user/history/:id`).*
 
-![Authenticated Customer Dashboard](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-3.png)
+![Authenticated Customer Dashboard](./roboshop-app-3.png)
 
 ---
 
 ### 4. Product Details & Real-Time Catalogue (`roboshop-app-4.png`)
 *Product item view dynamically queried from MongoDB via Catalogue Node.js microservice (`GET /api/catalogue/product/:id`).*
 
-![Product Details and Catalogue View](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-4.png)
+![Product Details and Catalogue View](./roboshop-app-4.png)
 
 ---
 
 ### 5. Automated Distance & Shipping Rate Calculation (`roboshop-app-5.png`)
 *Shipping Java/Maven microservice calculating distance and freight costs via relational MySQL cities database.*
 
-![Automated Shipping Rate Calculation](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-5.png)
+![Automated Shipping Rate Calculation](./roboshop-app-5.png)
 
 ---
 
 ### 6. Cart Checkout & Tax Ledger Breakdown (`roboshop-app-6.png`)
 *Cart microservice aggregation with tax calculation and pre-payment invoice review before payment dispatch.*
 
-![Cart Checkout and Invoice Breakdown](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-6.png)
+![Cart Checkout and Invoice Breakdown](./roboshop-app-6.png)
 
 ---
 
 ### 7. Asynchronous Payment Processing & Order Confirmation (`roboshop-app-7.png`)
 *Payment Python microservice dispatching order events asynchronously via RabbitMQ AMQP queue with verified Order ID generation.*
 
-![Order Confirmation and Payment Success](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/roboshop-app-7.png)
+![Order Confirmation and Payment Success](./roboshop-app-7.png)
 
 ---
 
@@ -538,28 +538,28 @@ ansible-playbook -i frontend.aws_ec2.yaml -e component=frontend roboshop.yaml
 ### 1. Cloud Infrastructure & DNS Provisioning (`deploying-1.png`)
 *Ansible provisioning 10 EC2 instances (`t3.micro`) on AWS and generating Route 53 private & public DNS records in `aitechapp.fun`.*
 
-![Infrastructure and Route 53 Provisioning Run](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/deploying-1.png)
+![Infrastructure and Route 53 Provisioning Run](./deploying-1.png)
 
 ---
 
 ### 2. Redis & MySQL Database Roles Deployment (`deploying-2.png`)
 *Configuration management playbook executing Redis cache setup and initiating MySQL database role with dynamic password retrieval.*
 
-![Database Tier Role Execution](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/deploying-2.png)
+![Database Tier Role Execution](./deploying-2.png)
 
 ---
 
 ### 3. Frontend Role & End-to-End Microservices Health Checks (`deploying-3.png`)
 *Deploying Nginx web gateway, configuring reverse-proxy upstream rules, and running ad-hoc HTTP curl tests validating live responses across all microservices (`catalogue`, `user`, `cart`, `shipping`, `payment`).*
 
-![Frontend Deployment and API Gateway Health Checks](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/deploying-3.png)
+![Frontend Deployment and API Gateway Health Checks](./deploying-3.png)
 
 ---
 
 ### 4. Automated Teardown & Cloud Cost Optimization (`deploying-4.png`)
 *Executing automated infrastructure decommissioning playbook with `action=destroy`, terminating all EC2 instances and pruning Route 53 DNS records.*
 
-![Automated Teardown and Resource Cleanup](file:///Users/sriramcharankolla/Desktop/DevOps/ansible-roboshop-roles/deploying-4.png)
+![Automated Teardown and Resource Cleanup](./deploying-4.png)
 
 ---
 
